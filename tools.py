@@ -7,12 +7,12 @@ class Ch:
     '''
     char containing its informations of context: line_no & column_no
     '''
-    def __init__(self, ch=' ', line_no=0, column_no=0):
-        self.ch = ch
+    def __init__(self, char=' ', line_no=0, column_no=0):
+        self.char = char
         self.line_no = line_no
         self.column_no = column_no
     def __str__(self):
-        ans = f'[line_no:{self.line_no},column_no:{self.column_no}]{self.ch}'
+        ans = f'[line_no:{self.line_no},column_no:{self.column_no}]{self.char}'
         return ans
 
 def read_file(filepath:str):
@@ -29,6 +29,14 @@ def read_file(filepath:str):
                 c = Ch(v, line_no, column_no+1)
                 ans.append(c)
     return ans
+
+def chs_to_str(chs:list)->str:
+    ans = ''
+    for v in chs:
+        v:Ch = v
+        ans += v.char
+    return ans
+
 
 if __name__ == '__main__':
     ret = read_file(r'pse\terngrad.pse.txt')
