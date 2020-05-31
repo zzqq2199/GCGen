@@ -4,6 +4,10 @@ logging.basicConfig(
     level = logging.DEBUG,
     format='%(filename)s[line:%(lineno)d][%(levelname)s] %(message)s',
 )
+
+class CompileException(Exception):
+    pass
+
 class Ch:
     '''
     char containing its informations of context: line_no & column_no

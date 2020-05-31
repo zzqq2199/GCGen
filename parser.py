@@ -46,7 +46,7 @@ class Parser:
             return 'operator'
         else:
             logging.error(cf.red(f"CANNOT indicate type of ch = {ch.char}"))
-            raise Exception(f"CANNOT indicate type of ch = {ch.char}")
+            raise CompileException(f"CANNOT indicate type of ch = {ch.char}")
 
     def find_end_of_current_name(self, chs:list, index:int):
         '''
@@ -113,6 +113,17 @@ class Parser:
         ans['type'] = 'space'
         ans['str'] = ''
         return ans
+    
+    def parse_all(self, chs:list):
+        index = 0
+        ans = []
+        while index < len(chs):
+            ret = self.next_token(chs, index)
+            ans.append(ret)
+            index = ret['end']
+        return ans
+    
+
             
 
 if __name__ == '__main__':
