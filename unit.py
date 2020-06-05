@@ -10,7 +10,8 @@ bitwidth_of_typename = {
     'uint': 32,
     'int': 32,
     'float': 32,
-    'void': 0
+    'void': 0,
+    'lambda_func': 0
 }
 
 
@@ -81,3 +82,64 @@ class Param():
 {vars_expr}]
 """
         return ans
+
+class Func():
+    def __init__(self, name:str):
+        self.name = name
+        self.params = dict()
+        self.vars = dict()
+        self.refs = dict() # used for LambdaFunc
+    def set_return_type(self, return_type:Utype):
+        self.return_type = return_type
+    def add_param(self, v:Variable):
+        if v.name in self.params:
+            raise CompileException(f"Redefinition {v.name} in parameters declaration of function {self.name}")
+        self.params[v.name] = v
+        self.vars[v.name] = v
+    def add_var(self, v:Variable):
+        if v.name in self.vars:
+            raise CompileException(f"Redefinition {v.name} in variable declaration of function {self.name}")
+        self.vars[v.name] = v
+    def __str__(self):
+        params_expr = ""
+        for v in self.params:
+            v = self.params[v]
+            params_expr += f"\t{v}\n"
+        vars_expr = ""
+        for v in self.vars:
+            if v not in self.params:
+                v = self.vars[v]
+                vars_expr += f"\t{v}\n"
+        ans = f"""Func[name:{self.name}
+Params:
+{params_expr}Vars:
+{vars_expr}]"""
+        return ans
+
+
+
+class Lambda_func(Func):
+    def add_ref(self, v:Variable):
+        self.refs[v.name] = v
+        self.vars[v.name] = v
+    def __str__(self):
+        params_expr = ""
+        for v in self.params:
+            v = self.params[v]
+            params_expr += f"\t{v}\n"
+        refs_expr = ""
+        for v in self.refs:
+            v = self.refs[v]
+            refs_expr += f"\t{v}\n"
+        vars_expr = ""
+        for v in self.vars:
+            if v not in self.params and v not in self.refs:
+                v = self.vars[v]
+                vars_expr += f"\t{v}\n"
+        ans = f"""Func[name:{self.name}
+Params:
+{params_expr}Vars:
+{vars_expr}]"""
+        return ans
+
+
