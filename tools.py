@@ -28,8 +28,11 @@ def read_file(filepath:str):
     with open(filepath, 'r') as f:
         line_no = 0
         for line in f.readlines():
-            line = line.strip('\n')
             line_no += 1
+            line = line.strip('\n')
+            p = line.find(r'//')
+            if p >= 0:
+                line = line[:p].strip()
             for column_no, v in enumerate(line):
                 c = Ch(v, line_no, column_no+1)
                 ans.append(c)
