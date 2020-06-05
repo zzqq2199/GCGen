@@ -104,11 +104,120 @@ class Tree:
                 raise CompileException(self.generate_bug(f"Behind definitioin of param, '{sep}' is expected!"))         
         return param
 
+    def fetch_and_check(self, expected_str):
+        t = self.next_token()
+        if t['str'] != expected_str:
+            raise CompileException(f"Expected {expected_str}")
+
+    @record_context
+    def block_reduce(self, l_var=None):
+        '''
+        @return:
+            str:    translated expression
+            return_type
+        '''
+        self.fetch_and_check('reduce')
+        self.fetch_and_check('(')
+        vector = self.next_token()
+        logging.debug(cf.red(f"self.context={self.context}"))
+        if vector['str'] not in self.context:
+            raise CompileException(f"Unrecognized varname {vector['str']}")
+        vector:Variable = self.context[vector['str']]
+        if vector.utype.is_vector == False:
+            raise CompileException(f"Expected vector type")
+        param1 = vector.name
+        self.fetch_and_check(',')
+        ret = self.block_right_expression(None,end=',')
+        param2 = ret['str']
+        # no ',', because already resolved in block_right_expression
+        param3 = self.next_token()
+        param3 = param3['str']
+        '''
+        do something with param3
+        '''
+        self.fetch_and_check(')')
+        logging.debug(f"param1={param1}\tparam2={param2}\tparam3={param3}")
+        expr = f'thrust::reduce(policy, {vector.name}, {vector.name}+{vector.size}, {param2}, {param3})'
+        ans=dict()
+        ans['str'] = expr
+        ans['return_type'] = vector.utype.name
+        return ans
+
+    @record_context
+    def block_right_expression(self, l_var=None, end=';'):
+        '''
+        it will resolve end
+        @return:
+            str:    translated expression
+            return_type:    
+        '''
+        ans = dict()
+        t = self.next_token()
+        self.i-=1
+        logging.debug(f"block_right_expression: t={t}") 
+        if t['str'] == 'reduce':
+            ret = self.block_reduce()
+            self.fetch_and_check(';')
+            return ret
+        else:
+            translated_tokens = []
+            while True:
+                t = self.next_token()
+                if t['str'] == end:
+                    break
+                if t['str'] == '.':
+                    translated_tokens[-1] = '_'+translated_tokens[-1]
+                    translated_tokens.append('_')
+                else:
+                    translated_tokens.append(t['str'])
+            translated_expr = ''.join(translated_tokens)
+            if l_var != None:
+                translated_expr = l_var.name + '=' + translated_expr
+            ans['str'] = translated_expr
+            ans['return_type'] = 'todo'
+        return ans
+
+    @record_context
+    def block_statement(self):
+        begin_index = self.i
+        t = self.next_token()
+        if is_typename(t['str']):
+            self.i -= 1
+            one_var:Varibale = self.block_one_param()
+            t = self.next_token()
+            if t['str'] == '=':
+                ret = self.block_right_expression(l_var=one_var)
+                logging.debug(f"ret['str']={ret['str']}")
+            elif t['str'] == ';':
+                pass
+            else:
+                raise CompileException(f"UNEXPECTED char: {t['str']}")
+            return one_var
+            one_var = self.block
+        elif t['str'] in self.context:
+            ele = self.context[t['str']]
+            if type(ele) != Variable:
+                raise CompileException(f"Variable type expected here.")
+            t = self.next_token()
+            if t['str'] == '=':
+                self.block_right_expression()
+            else:
+                raise CompileException(f"UNEXPECTED char: {t['str']}")
+            return None
+        else: # pure call, example: sort(G, greater)
+            self.i -= 1
+            self.block_right_expression()
+            return None
+
+
     @record_context
     def block_func(self):
         return_type = self.block_typename()
         name_token = self.next_token()
         assert(name_token['type']=='name')
+        func = Func(name_token['str'])
+        func.set_return_type(return_type)
+        # resolve parameters
         t = self.next_token()
         if t['str'] != '(':
             raise CompileException("'(' is expected after function name")
@@ -118,7 +227,8 @@ class Tree:
                 break
             self.i-=1
             one_param = self.block_one_param()
-            logging.debug(f"block_func: one_param={one_param}")
+            self.context[one_param.name] = one_param
+            func.add_param(one_param)
             t = self.next_token()
             if t['str'] == ')':
                 self.i-=1
@@ -126,8 +236,19 @@ class Tree:
                 pass
             else:
                 raise CompileException(self.generate_bug(f"',' or ')' expected after each parameter in function definition"))
-                
-        logging.debug(f'return_type={return_type}')
+        # resolve body
+        t = self.next_token()
+        if t['str'] != '{':
+            raise CompileException("'{' is expected")
+        self.block_statement()
+        self.block_statement()
+        self.block_statement()
+        self.block_statement()
+
+        print(func)
+
+        return func
+
 
     def block_code(self):
         '''
@@ -148,6 +269,7 @@ class Tree:
                     self.block_func()
         except CompileException as e:
             logging.error(self.generate_bug(e))
+            raise Exception
         
 
 
