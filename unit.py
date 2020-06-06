@@ -39,6 +39,14 @@ class Utype(): # difer from keyword type
                 self.bitwidth = sympy.Symbol(bitwidth)
         elif ret == 'param_type':
             self.bitwidth = 0
+    def generate_call(self):
+        name = self.name
+        if name == 'uint':
+            name = 'uint8'
+        if self.is_vector:
+            name+='*'
+        return name
+
     def __str__(self):
         ans = f"Utype[name:{self.name}, bitwidth:{self.bitwidth}, is_vector:{self.is_vector}]"
         return ans
@@ -61,8 +69,16 @@ class Variable():
             self.size = sympy.Symbol(f"_{name}_size")
         self.bits = self.size * utype.bitwidth
         self.bytes = (self.bits + 7 ) // 8
+        self.initialize_code = f"{utype.generate_call()} {name}"
+    def set_bits(self, bits):
+        self.bits = bits
+        self.bytes = (self.bits+7)//8
+        self.size = bits / self.utype.bitwidth
+    def set_initialize_code(self, code):
+        self.initialize_code = code
+
     def __str__(self):
-        ans = f"Var[name: {self.name}, utype:{self.utype}, bits:{self.bits}, bytes:{self.bytes}]"
+        ans = f"Var[name: {self.name}, utype:{self.utype}, bits:{self.bits}, bytes:{self.bytes}, initlize:{self.initialize_code}]"
         return ans
 
 class Param():
@@ -88,7 +104,6 @@ class Func():
         self.name = name
         self.params = dict()
         self.vars = dict()
-        self.refs = dict() # used for LambdaFunc
     def set_return_type(self, return_type:Utype):
         self.return_type = return_type
     def add_param(self, v:Variable):
@@ -119,9 +134,22 @@ Params:
 
 
 class Lambda_func(Func):
+    def __init__(self,name:str):
+        super(Lambda_func, self).__init__(name)
+        self.refs = dict() 
+        self.use_random = False
     def add_ref(self, v:Variable):
         self.refs[v.name] = v
         self.vars[v.name] = v
+    def set_use_random(self):
+        self.use_random = True
+    def generate_call(self, input_vector:Variable):
+        refs = []
+        for key in self.refs:
+            refs.append(key)
+        refs_expr = ",".join(refs)
+        call = f"{self.name}({refs_expr})"
+        return call
     def __str__(self):
         params_expr = ""
         for v in self.params:
@@ -136,10 +164,13 @@ class Lambda_func(Func):
             if v not in self.params and v not in self.refs:
                 v = self.vars[v]
                 vars_expr += f"\t{v}\n"
-        ans = f"""Func[name:{self.name}
+        ans = f"""Lamda_func[name:{self.name}
+Return_type:\t{self.return_type}
 Params:
-{params_expr}Vars:
+{params_expr}Refs:
+{refs_expr}Vars:
 {vars_expr}]"""
+        # return cf.yellow(ans)
         return ans
 
 
