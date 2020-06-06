@@ -1,16 +1,18 @@
-param TernGradParam{
-    uint8 bitwidth;
-}
+// param TernGradParam{
+//     uint8 bitwidth;
+// }
 
-void TernGradEncode(float* gradient, uint8* compressed, TernGradParam params){
-    float max = reduce(gradient, greater);
-    float min = reduce(gradient, smaller);
-    float gap = (max - min) / ( (1<<params.bitwidth) -1 );
-    uint8 tail = gradient.size % ( 1<<params.bitwidth);
-    lambda_func floatToUint = [&](int index) -> uint<params.bitwidth> {
+void TernGradEncode(float* gradient, uint8* compressed, uint8 bitwidth){
+    float max = reduce(gradient, -99999, greater);
+    float min = reduce(gradient, 99999, smaller);
+    // float max = 1;
+    // float min = -1;
+    float gap = (max - min) / ( (1<<bitwidth) -1 );
+    uint8 tail = gradient.size % ( 1<<bitwidth);
+    lambda_func floatToUint = [&](int index) -> uint<bitwidth> {
         float r = (gradient[index] - min) / gap + random<float>(0,1);
         return floor(r);
     }
-    uint<params.bitwidth>* Q = map(range(gradient.size), floatToUint);
-    compressed = concat(params.bitwidth, tail, min, max, Q);
+    uint<bitwidth>* Q = map(range(gradient.size), floatToUint);
+    compressed = concat(bitwidth, tail, min, max, Q);
 }
