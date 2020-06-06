@@ -3,8 +3,14 @@
 // }
 
 void TernGradEncode(float* gradient, uint8* compressed, uint8 bitwidth){
-    float max = reduce(gradient, -99999, greater);
-    float min = reduce(gradient, 99999, smaller);
+    lambda_func u_greater = [&](float a, float b) -> int{
+        return a > b;
+    }
+    lambda_func u_smaller = [&](float a, float b) -> int {
+        return a < b ;
+    }
+    float max = reduce(gradient, -99999, u_greater);
+    float min = reduce(gradient, 99999, u_smaller);
     // float max = 1;
     // float min = -1;
     float gap = (max - min) / ( (1<<bitwidth) -1 );

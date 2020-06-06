@@ -47,10 +47,7 @@ class Tree:
     @record_context
     def block_typename(self):
         '''
-        @return: a list of attributes about type
-            typename:
-            is_vector: 
-            bitwidth:   '' if not appointed
+        @return: Utype
         '''
         ans = dict()
         basic_type = self.next_token()
@@ -136,7 +133,7 @@ class Tree:
             t = self.next_token()
             ele:Variable = self.context[t['str']]
             if ele.utype.is_vector == False:
-                s += f"get_policy<policy_t>::memcpyIn({l_var.name}+({offset}), &{ele.name}, {ele.bytes});\n"
+                s += f"get_policy<policy_t>::memcpyIn({l_var.name}+({offset}), &{ele.name}, {ele.bytes}, stream);\n"
             else:
                 logging.debug(cf.red(f"ele={ele}"))
                 ele.set_initialize_code(f"{ele.utype.generate_call()} {ele.name}={l_var.name}+({offset})")
@@ -167,7 +164,7 @@ class Tree:
             ret = self.block_right_expression(l_var=None, end=')')
             input_len = sympy.Symbol(ret['str'])
             param1 = "thrust::counting_iterator<int32_t>(0)"
-            param2 = f"thrust::counting_iterator<int32_t>({ret['str']})"
+            # param2 = f"thrust::counting_iterator<int32_t>({ret['str']})"
         else:
             # make sure it is vector
             # assign input_vector
@@ -180,22 +177,27 @@ class Tree:
             if type(lambda_func) != Lambda_func:
                 raise CompileException(f"{t['str']} expected to be a Lambda_func")
             output_bits = input_len * lambda_func.return_type.bitwidth
-            param4 = lambda_func.generate_call(input_vector)
+            if lambda_func.need_aggregation():
+                logging.info(f"input_len={input_len}")
+                logging.info(f"lambda_func.aggregate_rate()={lambda_func.aggregate_rate()}")
+                aggregated_len = (input_len + lambda_func.aggregate_rate() - 1)//lambda_func.aggregate_rate()
+            else:
+                aggregated_len = input_len
+            param2 = f"{param1} + ({aggregated_len})"
+            param4 = lambda_func.generate_call(input_len)
         else:
             raise CompileException(f"Unrecognized {t}")
         self.fetch_and_check(')')
         self.fetch_and_check(';')
-        param3 = l_var.name
-        l_var.set_bits(output_bits)
-        ans['str'] = f'thrust::for_each(policy,{param1},{param2},{param3},{param4});'
-        ans['return_type'] = 'todo'
-
-        logging.debug(f"param1={param1}, param2={param2}")
-        logging.debug(f"t={t}")
-        logging.debug(f"input_len={input_len}")
-        logging.debug(f"output_bits={output_bits}")
-        logging.debug(f"l_var={l_var}")
-        logging.debug(f"lambda_func={lambda_func}")
+        if l_var != None:
+            param3 = l_var.name
+            l_var.set_bits(output_bits)
+            ans['str'] = f'thrust::transform(policy,{param1},{param2},{param3},{param4});'
+            # ans['str'] = f'thrust::for_each(policy,{param1},{param2},{param3},{param4});'
+            ans['return_type'] = 'todo'
+        else:
+            # thrust::for_each
+            pass
         return ans
 
 
@@ -222,6 +224,12 @@ class Tree:
         # no ',', because already resolved in block_right_expression
         param3 = self.next_token()
         param3 = param3['str']
+        if param3 in self.context:
+            v:Lambda_func = self.context[param3]
+            assert(type(v) == Lambda_func)
+            param3 = v.generate_call(maximum_index=None)
+        elif param3 == 'smaller':
+            param3 = f"thrust::smaller<{vector.utype.name}>()"
         '''
         do something with param3
         '''
@@ -229,7 +237,10 @@ class Tree:
         logging.debug(f"param1={param1}\tparam2={param2}\tparam3={param3}")
         expr = f'thrust::reduce(policy, {vector.name}, {vector.name}+{vector.size}, {param2}, {param3})'
         ans=dict()
-        ans['str'] = expr
+        if l_var == None:
+            ans['str'] = expr
+        else:
+            ans['str'] = f"{l_var.name} = {expr}"
         ans['return_type'] = vector.utype.name
         return ans
 
@@ -241,15 +252,25 @@ class Tree:
         self.fetch_and_check(']')
         self.fetch_and_check('(')
         while True:
+            one_param = self.block_one_param()
+            l_var.add_param(one_param)
             t = self.next_token()
             if t['str'] == ')':
                 break
-            self.i-=1
-            one_param = self.block_one_param()
-            l_var.add_param(one_param)
+            elif t['str'] == ',':
+                continue
+            else:
+                raise CompileException("Expected ')' or ',' here")
         self.fetch_and_check('->')
         return_type = self.block_typename()
         l_var.set_return_type(return_type)
+        if l_var.need_aggregation():
+            bw = str(l_var.return_type.bitwidth)
+            if bw not in self.context:
+                raise CompileException(f"Invalid bitwidth: {bw}")
+            bw = self.context[bw]
+            l_var.add_ref(bw)
+            
         logging.debug(f"block_lambda_func:\treturn_type={return_type}")
         self.fetch_and_check('{')
         # how to pick out refered vars?
@@ -262,14 +283,16 @@ class Tree:
             if s in current_unit.vars:
                 v = current_unit.vars[s]
                 l_var.add_ref(v)
+        self.context['current_unit'] = l_var
         while True:
             t = self.next_token()
             if t['str'] == ';':
                 continue
-            if t['str'] == '}':
+            elif t['str'] == '}':
                 break
             self.i-=1
             ret = self.block_statement()
+            l_var.add_statement(ret['str'])
             if 'defined_var' in ret:
                 defined_var = ret['defined_var']
                 l_var.add_var(defined_var)
@@ -317,7 +340,7 @@ class Tree:
         self.i-=1
         logging.debug(f"block_right_expression: t={t}") 
         if t['str'] == 'reduce':
-            ret = self.block_reduce()
+            ret = self.block_reduce(l_var)
             self.fetch_and_check(';')
             return ret
         if t['str'] == 'map':
@@ -340,6 +363,13 @@ class Tree:
                     p2 = self.next_token()
                     p2 = p2['str']
                     translated_tokens.append(f"_{p1}_{p2}")
+                elif t['str'] == 'random':
+                    self.fetch_and_check('<')
+                    utype:Utype = self.block_typename()
+                    self.fetch_and_check('>')
+                    current_func:Func = self.context['current_unit']
+                    current_func.set_use_random(utype)
+                    translated_tokens.append(f"random_{utype.name}")
                 else:
                     translated_tokens.append(t['str'])
             translated_expr = ''.join(translated_tokens)
@@ -376,7 +406,11 @@ class Tree:
                 raise CompileException(f"UNEXPECTED char: {t['str']}")
         elif t['str'] == 'return':
             ret = self.block_right_expression(l_var=None)
-            ans['str'] = f"return {ret['str']}"
+            current_func:Func = self.context['current_unit']
+            if current_func.need_aggregation():
+                ans['str'] = f"_q = (_q << ({current_func.return_type.bitwidth})) + {ret['str']}"
+            else:
+                ans['str'] = f"return {ret['str']}"
         elif t['str'] in self.context:
             ele = self.context[t['str']]
             if type(ele) != Variable:
@@ -391,7 +425,6 @@ class Tree:
             self.i -= 1
             ret = self.block_right_expression()
             ans['str'] = ret['str']
-        logging.info(f"translated: {ans['str']}")
         return ans
 
 
@@ -436,11 +469,13 @@ class Tree:
             logging.debug(cf.red(f"prefetch: t={t}"))
             self.i-=1
             ret = self.block_statement()
+            func.add_statement(ret['str'])
             if 'defined_var' in ret:
                 defined_var = ret['defined_var']
                 func.add_var(defined_var)
                 self.context[defined_var.name] = defined_var
         logging.info(f"func={func}")
+        func.dump_to_file()
         return func
 
 

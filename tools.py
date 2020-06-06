@@ -1,7 +1,7 @@
 import logging
 import colorful as cf
 logging.basicConfig(
-    level = logging.INFO,
+    level = logging.DEBUG,
     format='%(filename)s[line:%(lineno)d][%(levelname)s] %(message)s',
 )
 
