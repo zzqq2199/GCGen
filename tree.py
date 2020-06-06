@@ -19,7 +19,8 @@ class Tree:
 
     def record_context(f):
         def wrapper(self, *args, **kwargs):
-            context = copy.deepcopy(self.contexts[-1])
+            # context = copy.deepcopy(self.contexts[-1])
+            context = copy.copy(self.contexts[-1])
             self.contexts.append(context)
             self.context = self.contexts[-1]
             ret = f(self, *args, **kwargs)
@@ -59,7 +60,17 @@ class Tree:
         t = self.next_token()
         if t['str'] == '<':
             # elongated bitwidth
-            raise CompileException("NOT implement now")
+            bitwidth = self.block_right_expression(l_var=None,end='>')
+            is_vector = False
+            tt = self.next_token()
+            if tt['str'] == '*':
+                is_vector = True
+            else:
+                self.i-=1
+            logging.debug(cf.yellow(f"bitwidth={bitwidth}"))
+            utype = Utype(ans['typename'], bitwidth['str'], is_vector, self.context)
+            return utype
+            # raise CompileException("NOT implement now")
         else:
             self.i -= 1 # roll index back
         t = self.next_token()
@@ -101,13 +112,92 @@ class Tree:
             param.add_var(one_param)
             t = self.next_token()
             if t['str'] != ';':
-                raise CompileException(self.generate_bug(f"Behind definitioin of param, '{sep}' is expected!"))         
+                raise CompileException(self.generate_bug(f"Behind definitioin of param, ';' is expected!"))         
         return param
 
     def fetch_and_check(self, expected_str):
         t = self.next_token()
         if t['str'] != expected_str:
             raise CompileException(f"Expected {expected_str}")
+    
+    @record_context
+    def block_concat(self, l_var:Variable):
+        s = ""
+        ans= dict()
+        ans['return_type'] = 'todo'
+        current_unit:Func = self.context['current_unit']
+        if l_var.name not in current_unit.params:
+            raise CompileException("left value of `concat` must be params of Func")
+        logging.debug(f"l_var={l_var}")
+        self.fetch_and_check('concat')
+        self.fetch_and_check('(')
+        offset = 0
+        while True:
+            t = self.next_token()
+            ele:Variable = self.context[t['str']]
+            if ele.utype.is_vector == False:
+                s += f"get_policy<policy_t>::memcpyIn({l_var.name}+({offset}), &{ele.name}, {ele.bytes});\n"
+            else:
+                logging.debug(cf.red(f"ele={ele}"))
+                ele.set_initialize_code(f"{ele.utype.generate_call()} {ele.name}={l_var.name}+({offset})")
+                logging.debug(cf.red(f"ele={ele}"))
+            offset += ele.bytes
+            t = self.next_token()
+            if t['str'] == ')':
+                break
+            elif t['str'] == ',':
+                pass
+            else:
+                raise CompileException("Expected ',' or ')' here")
+        ans['str'] = s
+        return ans
+
+
+    @record_context
+    def block_map(self, l_var:Variable):
+        ans = dict()
+        self.fetch_and_check('map')
+        self.fetch_and_check('(')
+        t = self.next_token()
+        input_vector = None
+        input_len = 0
+        output_bits = 0
+        if t['str'] == 'range':
+            self.fetch_and_check('(')
+            ret = self.block_right_expression(l_var=None, end=')')
+            input_len = sympy.Symbol(ret['str'])
+            param1 = "thrust::counting_iterator<int32_t>(0)"
+            param2 = f"thrust::counting_iterator<int32_t>({ret['str']})"
+        else:
+            # make sure it is vector
+            # assign input_vector
+            # assign input_len
+            pass
+        self.fetch_and_check(',')
+        t = self.next_token()
+        if t['str'] in self.context:
+            lambda_func:Lambda_func = self.context[t['str']]
+            if type(lambda_func) != Lambda_func:
+                raise CompileException(f"{t['str']} expected to be a Lambda_func")
+            output_bits = input_len * lambda_func.return_type.bitwidth
+            param4 = lambda_func.generate_call(input_vector)
+        else:
+            raise CompileException(f"Unrecognized {t}")
+        self.fetch_and_check(')')
+        self.fetch_and_check(';')
+        param3 = l_var.name
+        l_var.set_bits(output_bits)
+        ans['str'] = f'thrust::for_each(policy,{param1},{param2},{param3},{param4});'
+        ans['return_type'] = 'todo'
+
+        logging.debug(f"param1={param1}, param2={param2}")
+        logging.debug(f"t={t}")
+        logging.debug(f"input_len={input_len}")
+        logging.debug(f"output_bits={output_bits}")
+        logging.debug(f"l_var={l_var}")
+        logging.debug(f"lambda_func={lambda_func}")
+        return ans
+
 
     @record_context
     def block_reduce(self, l_var=None):
@@ -144,6 +234,75 @@ class Tree:
         return ans
 
     @record_context
+    def block_lambda_func(self, l_var:Lambda_func):
+        l_var:Lambda_func = l_var
+        self.fetch_and_check('[')
+        self.fetch_and_check('&')
+        self.fetch_and_check(']')
+        self.fetch_and_check('(')
+        while True:
+            t = self.next_token()
+            if t['str'] == ')':
+                break
+            self.i-=1
+            one_param = self.block_one_param()
+            l_var.add_param(one_param)
+        self.fetch_and_check('->')
+        return_type = self.block_typename()
+        l_var.set_return_type(return_type)
+        logging.debug(f"block_lambda_func:\treturn_type={return_type}")
+        self.fetch_and_check('{')
+        # how to pick out refered vars?
+        logging.debug(f"self.context={self.context}")
+        end_lambda_func = self.get_index_of_right_bracket(self.i-1)
+        current_unit:Func = self.context['current_unit']
+        for i in range(self.i, end_lambda_func):
+            t = self.tokens[i]
+            s = t['str']
+            if s in current_unit.vars:
+                v = current_unit.vars[s]
+                l_var.add_ref(v)
+        while True:
+            t = self.next_token()
+            if t['str'] == ';':
+                continue
+            if t['str'] == '}':
+                break
+            self.i-=1
+            ret = self.block_statement()
+            if 'defined_var' in ret:
+                defined_var = ret['defined_var']
+                l_var.add_var(defined_var)
+                self.context[defined_var.name] = defined_var
+        logging.debug(f"ret={ret}")
+        ans = dict()
+        ans['str'] = ''
+        return ans
+        # logging.debug(f"lambda_func={l_var}")
+
+    def get_index_of_right_bracket(self, index_of_left_bracket:int):
+        '''
+        @return: if not exists, return -1
+        '''
+        i = index_of_left_bracket
+        l = self.tokens[i]
+        l = l['str']
+        d = {'(':')','[':']','{':'}','[':']'}
+        assert(l in d)
+        r = d[l]
+        depth = 0
+        while i < len(self.tokens):
+            t = self.tokens[i]
+            if t['str'] == l:
+                depth += 1
+            elif t['str'] == r:
+                depth -= 1
+                if depth == 0:
+                    return i
+            i += 1
+        return -1
+
+    @record_context
     def block_right_expression(self, l_var=None, end=';'):
         '''
         it will resolve end
@@ -151,6 +310,8 @@ class Tree:
             str:    translated expression
             return_type:    
         '''
+        if type(l_var) == Lambda_func:
+            return self.block_lambda_func(l_var)
         ans = dict()
         t = self.next_token()
         self.i-=1
@@ -159,15 +320,26 @@ class Tree:
             ret = self.block_reduce()
             self.fetch_and_check(';')
             return ret
+        if t['str'] == 'map':
+            ret = self.block_map(l_var)
+            return ret
+        if t['str'] == 'concat':
+            ret = self.block_concat(l_var)
+            return ret
         else:
             translated_tokens = []
             while True:
                 t = self.next_token()
                 if t['str'] == end:
                     break
-                if t['str'] == '.':
-                    translated_tokens[-1] = '_'+translated_tokens[-1]
-                    translated_tokens.append('_')
+                n = self.next_token()
+                self.i-=1
+                if n['str'] == '.':
+                    p1 = t['str']
+                    self.fetch_and_check('.')
+                    p2 = self.next_token()
+                    p2 = p2['str']
+                    translated_tokens.append(f"_{p1}_{p2}")
                 else:
                     translated_tokens.append(t['str'])
             translated_expr = ''.join(translated_tokens)
@@ -179,35 +351,48 @@ class Tree:
 
     @record_context
     def block_statement(self):
+        '''
+        @return:
+            str: how this sentence is translated
+            defined_var
+        '''
+        ans = dict()
         begin_index = self.i
         t = self.next_token()
         if is_typename(t['str']):
             self.i -= 1
             one_var:Varibale = self.block_one_param()
+            logging.debug(f"one_var={one_var}")
+            if one_var.utype.name == 'lambda_func':
+                one_var = Lambda_func(one_var.name)
+            ans['defined_var'] = one_var
             t = self.next_token()
             if t['str'] == '=':
                 ret = self.block_right_expression(l_var=one_var)
-                logging.debug(f"ret['str']={ret['str']}")
+                ans['str'] = ret['str']
             elif t['str'] == ';':
                 pass
             else:
                 raise CompileException(f"UNEXPECTED char: {t['str']}")
-            return one_var
-            one_var = self.block
+        elif t['str'] == 'return':
+            ret = self.block_right_expression(l_var=None)
+            ans['str'] = f"return {ret['str']}"
         elif t['str'] in self.context:
             ele = self.context[t['str']]
             if type(ele) != Variable:
                 raise CompileException(f"Variable type expected here.")
             t = self.next_token()
             if t['str'] == '=':
-                self.block_right_expression()
+                ret = self.block_right_expression(ele)
+                ans['str'] = ret['str']
             else:
                 raise CompileException(f"UNEXPECTED char: {t['str']}")
-            return None
         else: # pure call, example: sort(G, greater)
             self.i -= 1
-            self.block_right_expression()
-            return None
+            ret = self.block_right_expression()
+            ans['str'] = ret['str']
+        logging.info(f"translated: {ans['str']}")
+        return ans
 
 
     @record_context
@@ -217,6 +402,8 @@ class Tree:
         assert(name_token['type']=='name')
         func = Func(name_token['str'])
         func.set_return_type(return_type)
+        self.context['current_unit'] = func
+        self.context[func.name] = func
         # resolve parameters
         t = self.next_token()
         if t['str'] != '(':
@@ -240,13 +427,20 @@ class Tree:
         t = self.next_token()
         if t['str'] != '{':
             raise CompileException("'{' is expected")
-        self.block_statement()
-        self.block_statement()
-        self.block_statement()
-        self.block_statement()
-
-        print(func)
-
+        while True:
+            t = self.next_token()
+            if t['str'] == ';':
+                continue
+            if t['str'] == '}':
+                break
+            logging.debug(cf.red(f"prefetch: t={t}"))
+            self.i-=1
+            ret = self.block_statement()
+            if 'defined_var' in ret:
+                defined_var = ret['defined_var']
+                func.add_var(defined_var)
+                self.context[defined_var.name] = defined_var
+        logging.info(f"func={func}")
         return func
 
 
@@ -256,7 +450,7 @@ class Tree:
         '''
         try:
             # while self.i < len(self.tokens):
-            for cnt in range(2):
+            for cnt in range(1):
                 token = self.next_token()
                 if token['str'] == 'param':
                     param = self.block_param_define()
