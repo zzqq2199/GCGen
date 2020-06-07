@@ -475,9 +475,9 @@ class Tree:
                 func.add_var(defined_var)
                 self.context[defined_var.name] = defined_var
         logging.info(f"func={func}")
-        func.dump_body()
-        func.dump_wrapper()
-        func.dump_register()
+        # func.dump_body()
+        # func.dump_wrapper()
+        # func.dump_register()
         return func
 
 
