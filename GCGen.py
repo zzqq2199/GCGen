@@ -17,6 +17,8 @@ if __name__ == '__main__':
     tree = Tree(args.input_file)
     func = tree.block_func()
     if args.body:
+        import colorful as cf
+        print(cf.red("args.body"))
         func.dump_body()
     if args.wrapper:
         func.dump_wrapper()

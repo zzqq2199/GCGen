@@ -116,7 +116,50 @@ class Tree:
         t = self.next_token()
         if t['str'] != expected_str:
             raise CompileException(f"Expected {expected_str}")
-    
+        
+    def block_extract(self, l_var:None):
+        if l_var != None:
+            raise CompileException("Do not support left value for operator `extract`")
+        self.fetch_and_check("extract")
+        self.fetch_and_check('(')
+        current_unit:Func = self.context['current_unit']
+        params = []
+        while True:
+            t = self.next_token()
+            if t['str'] not in self.context:
+                raise CompileException("Unknown parameter")
+            v:Variable = self.context[t['str']]
+            params.append(v)
+            t = self.next_token()
+            if t['str'] == ',':
+                continue
+            elif t['str'] == ')':
+                break
+        offset = 0
+        u:Variable = params[0]
+        if u.utype.is_vector == False:
+            raise CompileException("Variable to extract is not a vector")
+        s = ""
+        for i in range(1,len(params)):
+            v:Variable = params[i]
+            if v.utype.is_vector == False:
+                s += f"get_policy<policy_t>::memcpyOut(&{v.name}, {u.name}+{offset}, {v.bytes}, stream);\n"
+            else:
+                if i < len(params)-1: # not last 
+                    raise CompileException("Please only use vector as last parameter in `extract`")
+                v.set_initialize_code(f"{v.utype.generate_call()} {v.name} = reinterpret_cast<{v.utype.generate_call()}>({u.name}+{offset})")
+                v.set_bits((u.bytes-offset)*8)
+            offset += v.bytes
+        ans = dict()
+        ans['str'] = s
+        ans['return_type'] = "none"
+        return ans
+
+
+
+            
+
+
     @record_context
     def block_concat(self, l_var:Variable):
         s = ""
@@ -283,6 +326,14 @@ class Tree:
             if s in current_unit.vars:
                 v = current_unit.vars[s]
                 l_var.add_ref(v)
+                if type(v) == Variable:
+                    v:Variable = v
+                    if v.utype.is_vector and v.utype.is_partial():
+                        bitwidth = v.utype.bitwidth
+                        bitwidth = str(bitwidth)
+                        bitwidth = self.context[bitwidth]
+                        l_var.add_ref(bitwidth)
+
         self.context['current_unit'] = l_var
         while True:
             t = self.next_token()
@@ -343,10 +394,13 @@ class Tree:
             ret = self.block_reduce(l_var)
             self.fetch_and_check(';')
             return ret
-        if t['str'] == 'map':
+        elif t['str'] == 'map':
             ret = self.block_map(l_var)
             return ret
-        if t['str'] == 'concat':
+        elif t['str'] == 'extract':
+            ret = self.block_extract(l_var)
+            return ret
+        elif t['str'] == 'concat':
             ret = self.block_concat(l_var)
             return ret
         else:
@@ -359,10 +413,39 @@ class Tree:
                 self.i-=1
                 if n['str'] == '.':
                     p1 = t['str']
-                    self.fetch_and_check('.')
-                    p2 = self.next_token()
-                    p2 = p2['str']
-                    translated_tokens.append(f"_{p1}_{p2}")
+                    if p1 not in self.context:
+                        raise CompileException("Unrecognized token")
+                    v:Variable = self.context[p1]
+                    if v.utype.is_vector:
+                        self.fetch_and_check('.')
+                        p2 = self.next_token()
+                        p2 = p2['str']
+                        if p2 == 'size':
+                            translated_tokens.append(f"{v.size}")
+                        else:
+                            raise CompileException("Unsupported sub call for vector")
+                    else:
+                        raise CompileException(f"Do not support sub call for {v.name}")
+                elif n['str'] == '[':
+                    p1 = t['str']
+                    if p1 not in self.context:
+                        raise CompileException("Unrecognized token")
+                    v:Variable = self.context[p1]
+                    if v.utype.is_vector == False:
+                        raise CompileException("Only support subscript for vector")
+                    self.fetch_and_check('[')
+                    index = self.block_right_expression(l_var=None,end=']')
+                    index = f"({index['str']})"
+                    index = sympy.Symbol(index)
+                    bitwidth = v.utype.bitwidth
+                    data_per_byte = 8 / bitwidth
+                    offset = index % data_per_byte
+                    index = index / data_per_byte
+                    index = f"static_cast<int>({index})"
+                    # mask = (1 << bitwidth) - 1
+                    mask = f"(1<<{bitwidth})-1"
+                    q = f"(({v.name}[{index}]>>({offset}*{bitwidth}))&({mask}))"
+                    translated_tokens.append(q)
                 elif t['str'] == 'random':
                     self.fetch_and_check('<')
                     utype:Utype = self.block_typename()
@@ -401,6 +484,7 @@ class Tree:
                 ret = self.block_right_expression(l_var=one_var)
                 ans['str'] = ret['str']
             elif t['str'] == ';':
+                ans['str'] = ""
                 pass
             else:
                 raise CompileException(f"UNEXPECTED char: {t['str']}")

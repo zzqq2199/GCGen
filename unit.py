@@ -33,6 +33,8 @@ header = f"""
 #include "get_policy_general.h"
 using namespace zq_cpp_lib::operate_memory;
 
+#define Mod(a,b) ((a)%(b))
+
 {type_alias}
 """
 
@@ -60,6 +62,9 @@ class Utype(): # difer from keyword type
                 self.bitwidth = sympy.Symbol(bitwidth)
         elif ret == 'param_type':
             self.bitwidth = 0
+    def is_partial(self):
+        if self.name == 'uint' and str(self.bitwidth) not in ['8','16','32']:
+            return True
     def elem_type_str(self):
         '''
         @return: type of element(no *)
@@ -375,6 +380,8 @@ namespace op{{
                 var_define += f"{v.initialize_code};\n"
         body_expr = ""
         for statement in self.statements:
+            if statement == '':
+                continue
             body_expr += f"{statement};\n"
 
         ans += f"""template <typename policy_t>
@@ -392,7 +399,8 @@ class Lambda_func(Func):
         super(Lambda_func, self).__init__(name)
         self.refs = dict()
     def need_aggregation(self):
-        if self.return_type.name == 'uint' and str(self.return_type.bitwidth) not in ['8','16','32']:
+        if self.return_type.is_partial():
+        # if self.return_type.name == 'uint' and str(self.return_type.bitwidth) not in ['8','16','32']:
             if len(self.params)!=1:
                 raise CompileException("You should provide only 1 params for aggregative lambda_func")
             return True
@@ -454,6 +462,8 @@ class Lambda_func(Func):
     if ({param.name} < _maximum_index){{
 """
         for statement in self.statements:
+            if statement == '':
+                continue
             body_expr += f"{statement};\n"
         if self.need_aggregation():
             body_expr += f"""   }} //if
