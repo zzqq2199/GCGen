@@ -179,14 +179,20 @@ Params:
             f.write(header)
             f.write(self.translated())
 
-    def dump_wrapper(self):
-        with open(f"output/{self.name}_wrapper.h", 'w') as f:
-            f.write(self.generate_wrapper_mxnet())
-    def dump_register(self):
-        with open(f"output/{self.name}.cc", 'w') as f:
-            f.write(self.generate_register_mxnet_cpu())
-        with open(f"output/{self.name}.cu", 'w') as f:
-            f.write(self.generate_register_mxnet_gpu())
+    def dump_wrapper(self, framework='mxnet'):
+        if framework == 'mxnet':
+            with open(f"output/{self.name}_wrapper.h", 'w') as f:
+                f.write(self.generate_wrapper_mxnet())
+        else:
+            raise Exception(f"Do not support {framework} now.")
+    def dump_register(self, framework='mxnet'):
+        if framework == 'mxnet':
+            with open(f"output/{self.name}.cc", 'w') as f:
+                f.write(self.generate_register_mxnet_cpu())
+            with open(f"output/{self.name}.cu", 'w') as f:
+                f.write(self.generate_register_mxnet_gpu())
+        else:
+            raise Exception(f"Do not support {framework} now.")
 
     def generate_register_mxnet_gpu(self):
         header = f'''#include "{self.name}_wrapper.h"
