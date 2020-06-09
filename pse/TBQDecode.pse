@@ -1,0 +1,8 @@
+void TBQDecode(uint8* compressed, float* gradient, float threshold){
+    uint<2>* Q;
+    extract(compressed, Q);
+    lambda_func uint2ToFloat = [&](int index) -> float{
+        return (Q[index]-1)*threshold;
+    }
+    gradient = map(range(Q.size), uint2ToFloat);
+}
