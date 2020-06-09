@@ -7,10 +7,15 @@ void TBQEncode(float* gradient, float* residual, uint8* compressed, float thresh
     lambda_func floatToUint2=[&](int index) -> uint<2>{
         float r = residual[index];
         if (r > threshold){
-            return 1;
+            return 2;
         }
         else{
-            return 0;
+            if (r<-threshold){
+                return 0;
+            }
+            else{
+                return 1;
+            }
         }
     }
     Q = map(range(residual.size), floatToUint2);
