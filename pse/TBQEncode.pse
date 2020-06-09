@@ -1,0 +1,18 @@
+void TBQEncode(float* gradient, float* residual, uint8* compressed, float threshold){
+    lambda_func add_gradient = [&](int index) -> float{
+        return gradient[index] + residual[index];
+    }
+    residual = map(range(gradient.size), add_gradient);
+    uint<2>* Q;
+    lambda_func floatToUint2=[&](int index) -> uint<2>{
+        float r = residual[index];
+        if (r > threshold){
+            return 1;
+        }
+        else{
+            return 0;
+        }
+    }
+    Q = map(range(residual.size), floatToUint2);
+    compressed = concat(Q);
+}

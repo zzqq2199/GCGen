@@ -179,22 +179,32 @@ Params:
     def aggregate_rate(self):
         return 1
 
+    def prepare_dir_before_dump(self, headers=['naive_random.hpp','get_policy_general.h']):
+        cmd = f'mkdir -p output/{self.name}'
+        import os
+        os.system(cmd)
+        for header in headers:
+            cmd = f"cp output/{header} output/{self.name}/{header}"
+            os.system(cmd)
+
     def dump_body(self):
-        with open(f"output/{self.name}_body.h",'w') as f:
+        self.prepare_dir_before_dump()
+        with open(f"output/{self.name}/{self.name}_body.h",'w') as f:
             f.write(header)
             f.write(self.translated())
 
     def dump_wrapper(self, framework='mxnet'):
         if framework == 'mxnet':
-            with open(f"output/{self.name}_wrapper.h", 'w') as f:
+            self.prepare_dir_before_dump(['get_stream_mxnet.h'])
+            with open(f"output/{self.name}/{self.name}_wrapper.h", 'w') as f:
                 f.write(self.generate_wrapper_mxnet())
         else:
             raise Exception(f"Do not support {framework} now.")
     def dump_register(self, framework='mxnet'):
         if framework == 'mxnet':
-            with open(f"output/{self.name}.cc", 'w') as f:
+            with open(f"output/{self.name}/{self.name}.cc", 'w') as f:
                 f.write(self.generate_register_mxnet_cpu())
-            with open(f"output/{self.name}.cu", 'w') as f:
+            with open(f"output/{self.name}/{self.name}.cu", 'w') as f:
                 f.write(self.generate_register_mxnet_gpu())
         else:
             raise Exception(f"Do not support {framework} now.")
@@ -454,8 +464,10 @@ class Lambda_func(Func):
             if v not in self.params and v not in self.refs:
                 v:Variable = self.vars[v]
                 var_define += f"\t{v.initialize_code};\n"
+        index_initialize = ""
         if self.need_aggregation():
             var_define += f"\tuint8 _q=0;"
+            index_initialize = f"\t{param.name} = {param.name} * ({self.aggregate_rate()});\n"
         if self.need_aggregation():
             body_expr += f"""for (int _i = 0; _i < {self.aggregate_rate()}; _i++){{
     {param.name}++;
@@ -470,7 +482,6 @@ class Lambda_func(Func):
 }} // for
 return _q;
 """
-            
         ans = f"""struct {self.name}{{
 {ref_define}
 {self.name}(
@@ -480,6 +491,7 @@ return _q;
 }}
 __host__ __device__
 {self.return_type.generate_call()} operator()({param_define}){{
+{index_initialize}
 {var_define}
 {body_expr}
 }}

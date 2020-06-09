@@ -309,10 +309,13 @@ class Tree:
         l_var.set_return_type(return_type)
         if l_var.need_aggregation():
             bw = str(l_var.return_type.bitwidth)
-            if bw not in self.context:
-                raise CompileException(f"Invalid bitwidth: {bw}")
-            bw = self.context[bw]
-            l_var.add_ref(bw)
+            if bw in ['1','2','4']:
+                pass
+            else:
+                if bw not in self.context:
+                    raise CompileException(f"Invalid bitwidth: {bw}")
+                bw = self.context[bw]
+                l_var.add_ref(bw)
             
         logging.debug(f"block_lambda_func:\treturn_type={return_type}")
         self.fetch_and_check('{')
@@ -377,6 +380,45 @@ class Tree:
         return -1
 
     @record_context
+    def block_if(self, l_var=None):
+        self.fetch_and_check('if')
+        self.fetch_and_check('(')
+        judge = self.block_right_expression(l_var=None, end=')')
+        t = self.next_token()
+        if t['str'] == '{':
+            self.i -= 1
+            body_if = self.block_block()
+            body_if = ";\n".join(body_if)
+        else:
+            self.i -= 1
+            body_if = self.block_statement()
+            body_if = body_if['str']
+        t = self.next_token()
+        body_else = ""
+        if t['str'] == 'else':
+            t = self.next_token()
+            if t['str'] == '{':
+                self.i -= 1
+                body_else = self.block_block()
+                body_else = ";\n".join(body_else)
+            else:
+                self.i -= 1
+                body_else = self.block_statment()
+                body_else = body_else['str']
+        else:
+            self.i-=1
+        ans = f'''if ({judge['str']}){{
+            {body_if};
+}}'''
+        if body_else != "":
+            ans += f'''else{{
+            {body_else};
+}}'''
+        ans += ";"
+        ans = {"str":ans, "return_type":"none"}
+        return ans
+
+    @record_context
     def block_right_expression(self, l_var=None, end=';'):
         '''
         it will resolve end
@@ -435,17 +477,22 @@ class Tree:
                         raise CompileException("Only support subscript for vector")
                     self.fetch_and_check('[')
                     index = self.block_right_expression(l_var=None,end=']')
-                    index = f"({index['str']})"
-                    index = sympy.Symbol(index)
-                    bitwidth = v.utype.bitwidth
-                    data_per_byte = 8 / bitwidth
-                    offset = index % data_per_byte
-                    index = index / data_per_byte
-                    index = f"static_cast<int>({index})"
-                    # mask = (1 << bitwidth) - 1
-                    mask = f"(1<<{bitwidth})-1"
-                    q = f"(({v.name}[{index}]>>({offset}*{bitwidth}))&({mask}))"
-                    translated_tokens.append(q)
+                    if v.utype.is_partial():
+                        index = f"({index['str']})"
+                        index = sympy.Symbol(index)
+                        bitwidth = v.utype.bitwidth
+                        data_per_byte = 8 / bitwidth
+                        offset = index % data_per_byte
+                        index = index / data_per_byte
+                        index = f"static_cast<int>({index})"
+                        # mask = (1 << bitwidth) - 1
+                        mask = f"(1<<{bitwidth})-1"
+                        q = f"(({v.name}[{index}]>>({offset}*{bitwidth}))&({mask}))"
+                        translated_tokens.append(q)
+                    else:
+                        index = index['str']
+                        q = f"{v.name}[{index}]"
+                        translated_tokens.append(q)
                 elif t['str'] == 'random':
                     self.fetch_and_check('<')
                     utype:Utype = self.block_typename()
@@ -488,6 +535,10 @@ class Tree:
                 pass
             else:
                 raise CompileException(f"UNEXPECTED char: {t['str']}")
+        elif t['str'] == 'if':
+            self.i-=1
+            ret = self.block_if(l_var=None)
+            ans['str'] = ret['str']
         elif t['str'] == 'return':
             ret = self.block_right_expression(l_var=None)
             current_func:Func = self.context['current_unit']
@@ -510,6 +561,31 @@ class Tree:
             ret = self.block_right_expression()
             ans['str'] = ret['str']
         return ans
+
+    @record_context
+    def block_block(self):
+        '''
+        @return: a list of statements
+        '''
+        ans = []
+        self.fetch_and_check('{')
+        func:Func = self.context['current_unit']
+        while True:
+            t = self.next_token()
+            if t['str'] == ';':
+                continue
+            elif t['str'] == '}':
+                break
+            self.i -= 1
+            ret = self.block_statement()
+            # func.add_statement(ret['str'])
+            ans.append(ret['str'])
+            if 'defined_var' in ret:
+                defined_var = ret['defined_var']
+                func.add_var(defined_var)
+                self.context[defined_var.name] = defined_var
+        return ans
+        
 
 
     @record_context
