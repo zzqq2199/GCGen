@@ -192,6 +192,61 @@ class Tree:
         ans['str'] = s
         return ans
 
+    @record_context
+    def block_filter(self, l_var:Variable):
+        ans = dict()
+        self.fetch_and_check('filter')
+        self.fetch_and_check('(')
+        t = self.next_token()
+        token = t['token']
+        ch:Ch = token[0]
+        line_no = ch.line_no
+        tmp_return = f"_end_{line_no}"
+        size_return = f"_size_{line_no}"
+        type_int = Utype(name='int',bitwidth='32',is_vector=False, context=self.context)
+        size_return = Variable(name=size_return, utype=type_int)
+        current_unit:Func = self.context['current_unit']
+        current_unit.add_var(size_return)
+
+        input_vector = None
+        input_len = 0
+        output_bits = 0
+        if t['str'] == 'range':
+            self.fetch_and_check('(')
+            ret = self.block_right_expression(l_var=None, end=')')
+            input_len = sympy.Symbol(ret['str'])
+            param1 = 'thrust::counting_iterator<int32_t>(0)'
+        else:
+            v:Variable = self.context[t['str']]
+            assert(v.utype.is_vector)
+            param1 = "{v.name}"
+            input_len = v.size
+            pass
+        self.fetch_and_check(',')
+        t = self.next_token()
+        if t['str'] in self.context:
+            lambda_func:Lambda_func = self.context[t['str']]
+            if type(lambda_func) != Lambda_func:
+                raise CompileException(f"{t['str']} expected to be a Lambda_func")
+            if lambda_func.need_aggregation():
+                raise CompileException("do not support aggregative lambda_func for filter")
+            param2 = f"{param1} + ({input_len})"
+            param4 = lambda_func.generate_call(input_len)
+        if l_var == None:
+            raise CompileException("`filter` need a left value")
+        self.fetch_and_check(')')
+        param3 = l_var.name
+        expr = f'auto {tmp_return} = thrust::copy_if(policy,{param1},{param2},{param3},{param4});\n'
+        expr += f'int {size_return.name} = {tmp_return} - {l_var.name};'
+        sym_size = sympy.Symbol(f"{size_return.name}")
+        l_var.set_size(sym_size)
+        ans['str'] = expr
+        ans['return_type'] = 'todo'
+        return ans
+
+        
+
+    
 
     @record_context
     def block_map(self, l_var:Variable):
@@ -209,6 +264,10 @@ class Tree:
             param1 = "thrust::counting_iterator<int32_t>(0)"
             # param2 = f"thrust::counting_iterator<int32_t>({ret['str']})"
         else:
+            v:Variable = self.context[t['str']]
+            assert(v.utype.is_vector)
+            param1 = f'{v.name}'
+            input_len = v.size
             # make sure it is vector
             # assign input_vector
             # assign input_len
@@ -243,6 +302,38 @@ class Tree:
             pass
         return ans
 
+    @record_context
+    def block_sort(self, l_var = None):
+        '''
+        @return:
+            str:    translated expression
+            return_type
+        '''
+        self.fetch_and_check('sort')
+        self.fetch_and_check('(')
+        vector = self.next_token()
+        if vector['str'] not in self.context:
+            raise CompileException(f"Unrecoginized varname {vector['str']}")
+        vector:Variable = self.context[vector['str']]
+        if vector.utype.is_vector == False:
+            raise CompileException(f"Expected vector type")
+        param1 = vector.name
+        self.fetch_and_check(',')
+        param2 = self.next_token()
+        param2 = param2['str']
+        if param2 in self.context:
+            v:Lambda_func = self.context[param2]
+            assert(type(v) == Lambda_func)
+            param2 = v.generate_call(maximum_index=None)
+            expr = f'thrust::sort(policy, {vector.name}, {vector.name}+{vector.size}, {param2})'
+        else:
+            raise CompileException("unexpected param")
+        self.fetch_and_check(')')
+        ans = dict()
+        ans['str'] = expr
+        ans['return_type'] = 'none'
+        return ans
+        
 
     @record_context
     def block_reduce(self, l_var=None):
@@ -334,8 +425,24 @@ class Tree:
                     if v.utype.is_vector and v.utype.is_partial():
                         bitwidth = v.utype.bitwidth
                         bitwidth = str(bitwidth)
-                        bitwidth = self.context[bitwidth]
-                        l_var.add_ref(bitwidth)
+                        if bitwidth in ['1','2','4']:
+                            pass
+                        else:
+                            bitwidth = self.context[bitwidth]
+                            l_var.add_ref(bitwidth)
+            elif s == '.':
+                a = self.tokens[i-1]
+                b = self.tokens[i+1]
+                a = a['str']
+                b = b['str']
+                # assume a denotes a vector
+                c = f'_{a}_{b}'
+                l_var.add_ref()
+                # logging.info(cf.red(f"c={c}"))
+                # if c in self.context:
+                #     logging.info("c in self.context")
+                #     c = self.context
+                #     l_var.add_ref(c)
 
         self.context['current_unit'] = l_var
         while True:
@@ -436,6 +543,14 @@ class Tree:
             ret = self.block_reduce(l_var)
             self.fetch_and_check(';')
             return ret
+        elif t['str'] == 'filter':
+            ret = self.block_filter(l_var)
+            self.fetch_and_check(';')
+            return ret
+        elif t['str'] == 'sort':
+            ret = self.block_sort(None)
+            self.fetch_and_check(';')
+            return ret
         elif t['str'] == 'map':
             ret = self.block_map(l_var)
             return ret
@@ -454,20 +569,28 @@ class Tree:
                 n = self.next_token()
                 self.i-=1
                 if n['str'] == '.':
-                    p1 = t['str']
-                    if p1 not in self.context:
-                        raise CompileException("Unrecognized token")
-                    v:Variable = self.context[p1]
-                    if v.utype.is_vector:
-                        self.fetch_and_check('.')
-                        p2 = self.next_token()
-                        p2 = p2['str']
-                        if p2 == 'size':
-                            translated_tokens.append(f"{v.size}")
+                    p1:str = t['str']
+                    self.fetch_and_check('.')
+                    p2 = self.next_token()
+                    if p1.isdigit():
+                        p2:str = p2['str']
+                        if not p2.isdigit():
+                            raise CompileException(f"Cannot resolve number: {p1}.{p2}")
+                        p12 = f"{p1}.{p2}"
+                        translated_tokens.append(p12)
+                    elif p1 in self.context:
+                        v:Variable = self.context[p1]
+                        if v.utype.is_vector:
+                            p2 = p2['str']
+                            if p2 == 'size':
+                                translated_tokens.append(f"{v.size}")
+                            else:
+                                raise CompileException("Unsupported sub call for vector")
                         else:
-                            raise CompileException("Unsupported sub call for vector")
+                            raise CompileException(f"Do not support sub call for {v.name}")
                     else:
-                        raise CompileException(f"Do not support sub call for {v.name}")
+                        raise CompileException(f"Unrecognized token: {p1}")
+
                 elif n['str'] == '[':
                     p1 = t['str']
                     if p1 not in self.context:

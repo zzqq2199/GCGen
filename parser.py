@@ -2,7 +2,7 @@ from tools import *
 class Parser:
     def __init__(self):
         self.operators2 = ['<<', '>>', '->', '//']
-        self.operators1 = ['+', '-', '*', '/', '[', ']', '&', '(', ')', '.', '{', '}', ';',',','=','%','^','|']
+        self.operators1 = ['+', '-', '*', '/', '[', ']', '&', '(', ')', '.', '{', '}', ';',',','=','%','^','|','.']
         self.operators = self.operators1.copy()
         self.operators.extend(self.operators2)
 

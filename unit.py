@@ -78,6 +78,15 @@ class Utype(): # difer from keyword type
         if self.is_vector:
             name+='*'
         return name
+    def generate_call_for_wrapper(self):
+        '''
+        uint8 --> uint32
+        '''
+        name = self.elem_type_str()
+        assert(not self.is_vector)
+        if name == 'uint8':
+            name = 'uint32'
+        return name
 
     def __str__(self):
         ans = f"Utype[name:{self.name}, bitwidth:{self.bitwidth}, is_vector:{self.is_vector}]"
@@ -102,6 +111,10 @@ class Variable():
         self.bits = self.size * utype.bitwidth
         self.bytes = (self.bits + 7 ) // 8
         self.initialize_code = f"{utype.generate_call()} {name}"
+    def set_size(self, size):
+        self.size = size
+        self.bits = self.utype.bitwidth * self.size
+        self.bytes = (self.bits+7)//8
     def set_bits(self, bits):
         self.bits = bits
         self.bytes = (self.bits+7)//8
@@ -297,7 +310,7 @@ namespace op{{
         for v in self.params:
             v:Variable = self.params[v]
             if v.utype.is_vector == False:
-                param_define += f"\t{v.utype.generate_call()} {v.name};\n"
+                param_define += f"\t{v.utype.generate_call_for_wrapper()} {v.name};\n"
                 dmlc_declare += f'\tDMLC_DECLARE_FIELD({v.name}).describe("Describe something for this parameter");\n'
             else:
                 ele_type = v.utype.elem_type_str()
@@ -470,7 +483,6 @@ class Lambda_func(Func):
             index_initialize = f"\t{param.name} = {param.name} * ({self.aggregate_rate()});\n"
         if self.need_aggregation():
             body_expr += f"""for (int _i = 0; _i < {self.aggregate_rate()}; _i++){{
-    {param.name}++;
     if ({param.name} < _maximum_index){{
 """
         for statement in self.statements:
@@ -479,6 +491,7 @@ class Lambda_func(Func):
             body_expr += f"{statement};\n"
         if self.need_aggregation():
             body_expr += f"""   }} //if
+    {param.name}++;
 }} // for
 return _q;
 """

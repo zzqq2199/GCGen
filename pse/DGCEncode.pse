@@ -1,0 +1,44 @@
+void DGCEncode(float* gradient, uint8* compressed, float selectRate, float sampleRate){
+    int sampleNum = ceil(gradient.size * sampleRate);
+    int expectedNum = floor(gradient.size * selectRate);
+    int N = gradient.size;
+    lambda_func sampling = [&](int index)->float{
+        int i = random<int>(0, N);
+        return abs(gradient[i]);
+    }
+    float* G;
+    G = map(range(sampleNum),sampling);
+    lambda_func u_greater = [&](float a, float b)->int{
+        return a > b;
+    }
+    sort(G, u_greater);
+    int thresholdIndex = floor(sampleNum*selectRate);
+    float threshold = G[thresholdIndex];
+    int* indices;
+    lambda_func filterIndex = [&](int index)->int{
+        // if ((gradient[index]>threshold || gradient[index]<-threshold)){
+        //     return 1;
+        // }
+        if (gradient[index] > threshold){
+            return 1;
+        }
+        if (gradient[index] < -threshold){
+            return 1;
+        }
+        return 0;
+    }
+    indices = filter(range(gradient.size), filterIndex);
+    int selectNum = indices.size;
+    lambda_func greaterByIndex = [&](int i, int j)->int{
+        return abs(gradient[i]) > abs(gradient[j]);
+    }
+    if (selectNum > expectedNum){
+        sort(indices, greaterByIndex);
+        //indices = indices[0:expectedNum]
+    }
+    lambda_func indexToValue = [&](int i)->float{
+        return gradient[i];
+    }
+    float* values;
+    values = map(indices, indexToValue);
+}
