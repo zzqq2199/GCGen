@@ -1,4 +1,4 @@
-void TernGradDecode(uint8* compressed, float* gradient){
+void TernGradDecode(uint8* compressed, float* gradient, int is_add_to){
     uint8 bitwidth;
     uint8 tail;
     float min;
@@ -9,6 +9,15 @@ void TernGradDecode(uint8* compressed, float* gradient){
     lambda_func uintToFloat = [&](int index) -> float{
         return Q[index]*gap + min;
     }
+    lambda_func uintToFloatAdd = [&](int index) -> float{
+        return Q[index]*gap + min + gradient[index];
+    }
     int true_Q_size = Q.size - tail;
-    gradient = map(range(true_Q_size), uintToFloat);
+    if (is_add_to){
+        gradient = map(range(true_Q_size), uintToFloatAdd);
+
+    }
+    else{
+        gradient = map(range(true_Q_size), uintToFloat);
+    }
 }
