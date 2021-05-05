@@ -1,0 +1,18 @@
+void OnebitEncode(float* gradient, uint8* compressed, uint8 use_scalar){
+    int N = gradient.size;
+    int M = (N-1)/8+1;
+    float scale = 1;
+    lambda_func abs_sum = [&](float a, float b)->float(
+        return abs(a)+abs(b);
+    )
+    if (use_scalar==1){
+        float l1_sum = reduce(gradient, abs_sum);
+        scale = l1_sum / N;
+    }
+    lambda_func floatToUint1=[&](int index) -> uint<1>{
+        float r = gradient[index];
+        return r < 0;
+    }
+    uint<1>*Q = map(gradient, floatToUint1);
+    compressed = concat(Q, scale); // compressed.size = M+4
+}

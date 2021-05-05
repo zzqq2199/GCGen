@@ -1,0 +1,19 @@
+void OnebitDecode(uint8* compressed, float* gradient, int original_len, int is_add_to){
+    int M = (original_len-1)/8+1;
+    float scale = 1;
+    uint<1>* Q;
+    extract(compressed[0:M],Q);
+    extract(compressed[M:M+4],scale);
+    lambda_func uintToFloat = [&](int index) -> float{
+        return scale*(1-2*compressed[index]);
+    }
+    lambda_func uintToFloatAdd = [&](int index) -> float{
+        return scale*(1-2*compressed[index])+gradient[index];
+    }
+    if (is_add_to){
+        gradient = map(range(original_len), uintToFloatAdd);
+    }
+    else{
+        gradient = map(range(original_len), uintToFloat);
+    }
+}
